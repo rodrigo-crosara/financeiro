@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Financeiro Unificado</title>
+
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#1f2937">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/idb@7/build/umd.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+
+    <style>
+        /* Estilos principais da aplicação (mantidos) */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .modal { transition: opacity 0.3s ease-in-out; }
+        .paid-item .description, .paid-item .due-date, .paid-item .amount { text-decoration: line-through; opacity: 0.5; }
+        .currency-input, .percent-input { padding-left: 2.25rem; }
+        .category-edit-input, .purpose-edit-input {
+            width: 100%; background-color: #374151; border: 1px solid #4b5563;
+            border-radius: 0.375rem; padding: 0.25rem 0.5rem; color: white;
+        }
+        .category-edit-input { font-size: 1.25rem; font-weight: 600; }
+        .nav-link.active {
+            background-color: #4A5568;
+            color: white;
+        }
+    </style>
+</head>
+<body class="text-gray-200">
+
+    <div id="auth-section">
+        <div class="auth-container">
+            <h1 class="text-3xl font-bold text-white mb-6 text-center">Painel Financeiro</h1>
+            <div id="auth-form-container">
+                <form id="login-form" class="auth-form">
+                    <h2 class="form-title">Acessar</h2>
+                    <p id="login-error" class="error-message"></p>
+                    <div class="input-group">
+                        <label for="login-username">Nome de Usuário</label>
+                        <input type="text" id="login-username" required autocomplete="username webauthn">
+                    </div>
+                    <button type="submit" class="auth-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 8a6 6 0 11-12 0 6 6 0 0112 0zM7 8a1 1 0 11-2 0 1 1 0 012 0zm5 0a1 1 0 11-2 0 1 1 0 012 0z" clip-rule="evenodd" /><path d="M5.5 16a3.5 3.5 0 015.446-2.825 6.002 6.002 0 01-5.446 2.825zM14.5 16a3.5 3.5 0 00-5.446-2.825 6.002 6.002 0 005.446 2.825z" /></svg>
+                        Entrar com Senha / Biometria
+                    </button>
+                    <p class="toggle-form-text">Não tem uma conta? <a href="#" id="show-register">Registre-se</a></p>
+                </form>
+
+                <form id="register-form" class="auth-form" style="display: none;">
+                    <h2 class="form-title">Registrar</h2>
+                    <p id="register-error" class="error-message"></p>
+                    <div class="input-group">
+                        <label for="register-username">Nome de Usuário</label>
+                        <input type="text" id="register-username" required autocomplete="username">
+                    </div>
+                    <button type="submit" class="auth-button">Criar Conta com Biometria / Senha</button>
+                    <p class="toggle-form-text">Já tem uma conta? <a href="#" id="show-login">Acesse</a></p>
+                </form>
+            </div>
+             <p class="auth-info">
+                Este aplicativo usa <strong>Passkeys (WebAuthn)</strong> para um login seguro sem senhas. Você usará a biometria ou o PIN do seu dispositivo.
+            </p>
+        </div>
+    </div>
+
+    <div id="app-section" style="display: none;">
+        <header class="bg-gray-800 shadow-lg sticky top-0 z-40">
+            <div class="container mx-auto max-w-7xl px-4">
+                <div class="flex justify-between items-center py-3">
+                    <h1 class="text-xl md:text-2xl font-bold text-white">Meu Painel Financeiro</h1>
+                    <div class="flex items-center space-x-2 md:space-x-4">
+                        <nav class="flex space-x-2 md:space-x-4">
+                            <button data-view="dashboard" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">Dashboard</button>
+                            <button data-view="earnings" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">Ganhos</button>
+                            <button data-view="bills" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">Contas</button>
+                        </nav>
+                        <button id="logout-btn" title="Sair" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-red-700 hover:text-white transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clip-rule="evenodd" /></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main id="main-content" class="container mx-auto max-w-7xl p-4 md:p-6"></main>
+
+        <div id="earning-modal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50"></div>
+        <div id="purpose-modal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50"></div>
+        <div id="bill-modal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50"></div>
+        <div id="confirm-modal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50"></div>
+        
+        <template id="dashboard-template">
+            <div class="max-w-6xl mx-auto">
+                <header class="text-center mb-8">
+                    <h1 class="text-3xl md:text-4xl font-bold text-white">Dashboard Financeiro Mensal</h1>
+                    <p class="text-gray-400 mt-1">Sua visão financeira consolidada.</p>
+                </header>
+                <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col justify-center text-center"><span class="text-lg text-gray-400">Total de Ganhos</span><p id="total-earnings" class="text-4xl font-bold text-green-400 mt-2">R$ 0,00</p></div>
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col justify-center text-center"><span class="text-lg text-gray-400">Total de Despesas</span><p id="total-expenses" class="text-4xl font-bold text-red-400 mt-2">R$ 0,00</p></div>
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex flex-col justify-center text-center"><span class="text-lg text-gray-400">Saldo Final</span><p id="final-balance" class="text-4xl font-bold text-white mt-2">R$ 0,00</p></div>
+                </section>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="bg-gray-800 p-4 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-center">Balanço do Mês Atual</h3><div class="h-64 md:h-72 flex justify-center items-center"><canvas id="balanceChart"></canvas></div></div>
+                        <div class="bg-gray-800 p-4 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-center">Despesas do Mês por Categoria</h3><div class="h-64 md:h-72 flex justify-center items-center"><canvas id="expensesChart"></canvas></div></div>
+                        <div class="bg-gray-800 p-4 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-center">Histórico de Saldo Mensal</h3><div class="h-64 md:h-72 flex justify-center items-center"><canvas id="historyChart"></canvas></div></div>
+                    </div>
+                    <div class="space-y-6">
+                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-3">Insights Rápidos</h3><div id="insights-content" class="text-gray-300 space-y-2"></div></div>
+                        <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                            <h3 class="text-xl font-semibold my-4">Ações do Mês</h3>
+                            <div class="space-y-4">
+                                <button id="start-new-month-btn" class="block w-full text-center bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105">
+                                    ✨ Iniciar Novo Mês com Modelos
+                                </button>
+                                <button id="close-month-btn" class="block w-full text-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105">
+                                    🗓️ Fechar o Mês
+                                </button>
+                            </div>
+                            <h3 class="text-xl font-semibold my-4 pt-4 border-t border-gray-700">Configurações de Dados</h3>
+                            <div class="space-y-4">
+                                <button id="import-history-btn" class="block w-full text-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105">
+                                    Importar Histórico (.json)
+                                </button>
+                                <button id="clear-all-data-btn" class="block w-full text-center bg-red-800 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105 mt-2">
+                                    ⚠️ Limpar Todos os Dados (Irreversível)
+                                </button>
+                                <input type="file" id="import-file-input" class="hidden" multiple accept=".json">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template id="earnings-template">
+            <div class="max-w-5xl mx-auto">
+                <header class="text-center mb-6"><h1 class="text-3xl md:text-4xl font-bold text-white">Controle de Ganhos Mensais</h1><p class="text-gray-400 mt-1">Defina o propósito para o seu dinheiro.</p></header>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="flex flex-col space-y-6">
+                        <section class="bg-gray-800 p-6 rounded-lg shadow-lg text-center"><span class="text-lg text-gray-400">Total de Ganhos Mensais</span><p id="total-earnings-display" class="text-4xl font-bold text-green-400 mt-2">R$ 0,00</p></section>
+                        <section class="bg-gray-800 p-4 rounded-lg shadow-lg flex-grow">
+                            <div class="flex justify-between items-center mb-3 border-b border-gray-700 pb-2"><h2 class="text-xl font-semibold text-white">Fontes de Renda</h2><button id="add-earning-btn" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition-transform transform hover:scale-110"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button></div>
+                            <ul id="earnings-list" class="space-y-3"></ul>
+                        </section>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+                        <div class="flex justify-between items-center mb-3 border-b border-gray-700 pb-2"><h2 class="text-xl font-semibold text-white">Distribuição de Ganhos</h2><button id="add-purpose-btn" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition-transform transform hover:scale-110"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button></div>
+                        <div id="purposes-list" class="space-y-3"></div>
+                        <div class="mt-4 pt-3 border-t border-gray-700 flex justify-between items-center font-bold"><span>Total</span><span id="total-percentage" class="text-lg">0%</span><span id="total-distributed-amount" class="text-lg text-white">R$ 0,00</span></div>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template id="bills-template">
+             <div class="max-w-4xl mx-auto">
+                <header class="text-center mb-6"><h1 class="text-3xl md:text-4xl font-bold text-white">Controle de Contas Mensais</h1><p class="text-gray-400 mt-1">Sua vida financeira, simples e visual.</p></header>
+                <section id="summary-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-lg flex items-center"><div class="bg-red-500/20 text-red-400 p-3 rounded-full mr-4"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg></div><div><span class="text-sm text-gray-400">Total a Pagar</span><p id="total-amount" class="text-xl font-semibold text-white">R$ 0,00</p></div></div>
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-lg flex items-center"><div class="bg-green-500/20 text-green-400 p-3 rounded-full mr-4"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg></div><div><span class="text-sm text-gray-400">Total Pago</span><p id="paid-amount" class="text-xl font-semibold text-white">R$ 0,00</p></div></div>
+                    <div class="bg-gray-800 p-4 rounded-lg shadow-lg flex items-center"><div class="bg-yellow-500/20 text-yellow-400 p-3 rounded-full mr-4"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div><div><span class="text-sm text-gray-400">Pendente</span><p id="pending-amount" class="text-xl font-semibold text-white">R$ 0,00</p></div></div>
+                </section>
+                <main id="bills-container" class="space-y-6"></main>
+                <button id="add-bill-btn" class="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
+            </div>
+        </template>
+    </div>
+
+    <script src="auth.js"></script>
+
+<script>
+// Inicializa a aplicação
+$(document).ready(function() {
+    
+    // #region ############# ESTADO GLOBAL, DB E SERVIÇO DE DADOS #############
+    let state = {
+        bills: [], earnings: [], purposes: [], history: [],
+        billTemplates: [], earningTemplates: [],
+        currentView: 'dashboard',
+        isOnline: navigator.onLine
+    };
+    let confirmCallback = null;
+    let chartInstances = { balance: null, expenses: null, history: null };
+    let db;
+
+    async function initDB() {
+        db = await idb.openDB('financial-dashboard-db', 1, {
+            upgrade(db) {
+                if (!db.objectStoreNames.contains('sync-queue')) {
+                    db.createObjectStore('sync-queue', { keyPath: 'id', autoIncrement: true });
+                }
+            },
+        });
+        console.log("Banco de dados local (IndexedDB) pronto.");
+    }
+    
+    const dataService = {
+        loadAllData: function() {
+            $.ajax({
+                url: 'api.php?action=loadAllData',
+                type: 'GET',
+                dataType: 'json',
+                success: function(response) {
+                    console.log("Dados carregados do servidor.", response);
+                    state.bills = (response.bills || []).map(b => ({...b, id: b.client_id, isPaid: !!parseInt(b.isPaid)}));
+                    state.earnings = (response.earnings || []).map(e => ({...e, id: e.client_id}));
+                    state.purposes = (response.purposes || []).map(p => ({...p, id: p.client_id}));
+                    state.billTemplates = response.billTemplates || [];
+                    state.earningTemplates = response.earningTemplates || [];
+                    state.history = (response.history && Array.isArray(response.history)) 
+                        ? response.history.map(h => ({ ...(h.data || {}), server_id: h.id })) 
+                        : [];
+                    navigateTo('dashboard');
+                },
+                error: function(xhr, status, error) {
+                    console.error("Não foi possível carregar dados do servidor. A aplicação pode estar offline.", status, error);
+                    alert("Não foi possível conectar ao servidor. Verifique sua conexão.");
+                }
+            });
+        },
+        
+        async syncItem(action) {
+            if (!db) {
+                alert("O banco de dados local não está pronto.");
+                return;
+            }
+            
+            await db.add('sync-queue', action);
+            
+            if ('serviceWorker' in navigator && 'SyncManager' in window) {
+                try {
+                    const registration = await navigator.serviceWorker.ready;
+                    await registration.sync.register('sync-data');
+                    console.log('Sincronização em segundo plano registrada.');
+                } catch (err) {
+                    console.error('Registro de sincronização em segundo plano falhou:', err);
+                    if (state.isOnline) dataService.processSyncQueue();
+                }
+            } else {
+                if (state.isOnline) dataService.processSyncQueue();
+            }
+        },
+
+        async processSyncQueue() {
+            if (!db || !state.isOnline) return;
+            const actions = await db.getAll('sync-queue');
+            if (actions.length === 0) return;
+
+            console.log(`Processando ${actions.length} ações da fila...`);
+            
+            $.ajax({
+                url: 'api.php?action=processSyncQueue',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({actions: actions}),
+                dataType: 'json',
+                success: async function(response) {
+                    if (response.success) {
+                        console.log("Fila processada com sucesso no servidor.");
+                        const tx = db.transaction('sync-queue', 'readwrite');
+                        for (const id of response.processed_ids) {
+                            tx.store.delete(id);
+                        }
+                        await tx.done;
+                    } else {
+                        console.error("Erro ao processar a fila no servidor:", response.message);
+                    }
+                },
+                error: function() {
+                    console.error("Falha de conexão ao tentar processar a fila.");
+                }
+            });
+        }
+    };
+    // #endregion
+    
+    // #region ############# FUNÇÕES AUXILIARES E DE MODAL #############
+    function formatCurrency(value) { return (value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+    function parseCurrency(value) { return parseFloat(String(value).replace(/\./g, '').replace(',', '.')) || 0; }
+    function openModal(modalId, contentHtml) {
+        if(contentHtml) $(`#${modalId}`).html(contentHtml);
+        $(`#${modalId}`).removeClass('opacity-0 pointer-events-none').find('.modal-content').removeClass('scale-95').addClass('scale-100');
+    }
+    function closeModal(modalId) {
+        $(`#${modalId}`).addClass('opacity-0 pointer-events-none').find('.modal-content').removeClass('scale-100').addClass('scale-95');
+    }
+    function showConfirmModal(message, onConfirm) {
+        const confirmModalHtml = `<div class="modal-content bg-gray-800 rounded-lg shadow-xl w-full max-w-sm p-6 transform scale-95 transition-transform"><h2 class="text-xl font-bold mb-4">Confirmar Ação</h2><p class="text-gray-300 mb-6">${message}</p><div class="flex justify-end space-x-3"><button type="button" class="cancel-btn px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md font-medium">Cancelar</button><button type="button" class="confirm-ok-btn px-4 py-2 bg-red-600 hover:bg-red-700 rounded-md font-medium">Confirmar</button></div></div>`;
+        confirmCallback = onConfirm;
+        openModal('confirm-modal', confirmModalHtml);
+    }
+    // #endregion
+    
+    // #region ############# LÓGICA DE NAVEGAÇÃO E RENDERIZAÇÃO #############
+    function navigateTo(viewName) {
+        state.currentView = viewName;
+        const template = $(`#${viewName}-template`);
+        $('#main-content').html(template.html());
+        
+        $('.nav-link').removeClass('active');
+        $(`.nav-link[data-view="${viewName}"]`).addClass('active');
+
+        switch (viewName) {
+            case 'dashboard': renderDashboard(); break;
+            case 'earnings': renderEarnings(); break;
+            case 'bills': renderBills(); break;
+        }
+    }
+
+    function renderDashboard() {
+        const totalEarnings = state.earnings.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+        const totalExpenses = state.bills.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+        const finalBalance = totalEarnings - totalExpenses;
+
+        $('#total-earnings').text(formatCurrency(totalEarnings));
+        $('#total-expenses').text(formatCurrency(totalExpenses));
+        $('#final-balance').text(formatCurrency(finalBalance)).toggleClass('text-green-400', finalBalance >= 0).toggleClass('text-red-400', finalBalance < 0);
+
+        const insightsContainer = $('#insights-content').empty();
+        if (totalEarnings === 0 && totalExpenses === 0 && state.history.length === 0) {
+            insightsContainer.append('<p>Comece um novo mês a partir de modelos ou adicione ganhos e despesas para ver os insights.</p>');
+        } else {
+            if (finalBalance >= 0) insightsContainer.append('<p class="text-green-400">✅ Ótimo trabalho! Seus ganhos superaram suas despesas este mês.</p>');
+            else insightsContainer.append('<p class="text-red-400">⚠️ Atenção! Suas despesas foram maiores que seus ganhos este mês.</p>');
+        }
+        
+        const expensesByCategory = state.bills.reduce((acc, bill) => {
+            acc[bill.category] = (acc[bill.category] || 0) + parseFloat(bill.amount);
+            return acc;
+        }, {});
+
+        updateCharts({
+            totalEarnings, totalExpenses,
+            categoryLabels: Object.keys(expensesByCategory),
+            categoryData: Object.values(expensesByCategory),
+            history: state.history
+        });
+    }
+
+    function updateCharts(data) {
+        Chart.defaults.color = '#a0aec0';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+        const categoryColors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1'];
+
+        if(chartInstances.balance) chartInstances.balance.destroy();
+        if (document.getElementById('balanceChart')) {
+            chartInstances.balance = new Chart($('#balanceChart'), { type: 'doughnut', data: { labels: ['Ganhos', 'Despesas'], datasets: [{ data: [data.totalEarnings || 1, data.totalExpenses || 1], backgroundColor: ['#10B981', '#EF4444'], borderColor: '#1f2937', borderWidth: 4, hoverOffset: 8 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { padding: 20 } } } } });
+        }
+
+        if(chartInstances.expenses) chartInstances.expenses.destroy();
+        const expensesContainer = $('#expensesChart').parent();
+        if(expensesContainer.length > 0) {
+            if(data.categoryLabels && data.categoryLabels.length > 0) {
+                expensesContainer.html('<canvas id="expensesChart"></canvas>');
+                chartInstances.expenses = new Chart($('#expensesChart'), { type: 'doughnut', data: { labels: data.categoryLabels, datasets: [{ data: data.categoryData, backgroundColor: categoryColors, borderColor: '#1f2937', borderWidth: 4, hoverOffset: 8 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { padding: 20 } } } } });
+            } else expensesContainer.html('<p class="text-center text-gray-500">Sem despesas para exibir o gráfico.</p>');
+        }
+
+        if(chartInstances.history) chartInstances.history.destroy();
+        const historyContainer = $('#historyChart').parent();
+        if(historyContainer.length > 0) {
+            if(data.history && data.history.length > 0) {
+                historyContainer.html('<canvas id="historyChart"></canvas>');
+                chartInstances.history = new Chart($('#historyChart'), { type: 'bar', data: { labels: data.history.map(h => h.monthYear), datasets: [{ label: 'Saldo Final', data: data.history.map(h => h.summary.finalBalance), backgroundColor: data.history.map(h => h.summary.finalBalance >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)'), borderColor: data.history.map(h => h.summary.finalBalance >= 0 ? '#10B981' : '#EF4444'), borderWidth: 1 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } } });
+            } else historyContainer.html('<p class="text-center text-gray-500">Nenhum histórico salvo. Feche um mês para começar.</p>');
+        }
+    }
+
+    function renderEarnings() {
+        const totalEarnings = state.earnings.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+        $('#total-earnings-display').text(formatCurrency(totalEarnings));
+
+        const earningsList = $('#earnings-list').empty();
+        if (state.earnings.length === 0) earningsList.html('<p class="text-center text-gray-500 text-sm">Nenhuma renda adicionada.</p>');
+        state.earnings.forEach(item => {
+            const li = $(`<li data-id="${item.id}" class="flex items-center p-2 rounded-md hover:bg-gray-700/50"><div class="flex-grow"><p class="font-medium text-white">${item.description}</p></div><p class="font-semibold text-lg text-green-400">${formatCurrency(parseFloat(item.amount))}</p><div class="ml-4 flex items-center space-x-2"><button class="edit-earning-btn p-2 text-gray-400 hover:text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg></button><button class="delete-earning-btn p-2 text-gray-400 hover:text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg></button></div></li>`);
+            earningsList.append(li);
+        });
+
+        const purposesList = $('#purposes-list').empty();
+        if (state.purposes.length === 0) purposesList.html('<p class="text-center text-gray-500 text-sm">Nenhum propósito adicionado.</p>');
+        let totalPercentage = 0;
+        state.purposes.forEach(item => {
+            const itemPercentage = parseFloat(item.percentage);
+            const calculatedAmount = totalEarnings * (itemPercentage / 100);
+            totalPercentage += itemPercentage;
+            const li = $(`<div data-id="${item.id}" class="grid grid-cols-12 gap-2 items-center p-2 rounded-md hover:bg-gray-700/50"><div class="col-span-5"><p class="font-medium text-white truncate" title="${item.description}">${item.description}</p></div><div class="col-span-2 text-center"><p class="font-mono">${itemPercentage.toFixed(1)}%</p></div><div class="col-span-3 text-right"><p class="font-semibold text-white">${formatCurrency(calculatedAmount)}</p></div><div class="col-span-2 flex items-center justify-end space-x-1"><button class="edit-purpose-btn p-1 text-gray-400 hover:text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg></button><button class="delete-purpose-btn p-1 text-gray-400 hover:text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg></button></div></div>`);
+            purposesList.append(li);
+        });
+        $('#total-percentage').text(`${totalPercentage.toFixed(1)}%`).toggleClass('text-red-400', totalPercentage.toFixed(1) !== '100.0');
+        $('#total-distributed-amount').text(formatCurrency(totalEarnings * (totalPercentage / 100)));
+    }
+
+    function renderBills() {
+        const totalAmount = state.bills.reduce((sum, bill) => sum + parseFloat(bill.amount), 0);
+        const paidAmount = state.bills.filter(bill => bill.isPaid).reduce((sum, bill) => sum + parseFloat(bill.amount), 0);
+        $('#total-amount').text(formatCurrency(totalAmount));
+        $('#paid-amount').text(formatCurrency(paidAmount));
+        $('#pending-amount').text(formatCurrency(totalAmount - paidAmount));
+        
+        const container = $('#bills-container').empty();
+        if (state.bills.length === 0) container.html('<p class="text-center text-gray-400">Nenhuma conta adicionada ainda.</p>');
+        const categories = [...new Set(state.bills.map(bill => bill.category))].sort();
+
+        categories.forEach(category => {
+            const categoryBills = state.bills.filter(bill => bill.category === category);
+            const categoryTotal = categoryBills.reduce((sum, bill) => sum + parseFloat(bill.amount), 0);
+            const categoryPaid = categoryBills.filter(bill => bill.isPaid).reduce((sum, bill) => sum + parseFloat(bill.amount), 0);
+            
+            const categorySection = $(`<div class="bg-gray-800 p-4 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-3 border-b border-gray-700 pb-2"><div class="category-title-wrapper flex-grow"><h3 class="text-xl font-semibold text-white category-title" data-category="${category}">${category}</h3></div><div class="flex items-center space-x-1"><button class="edit-category-btn p-2 text-gray-400 hover:text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg></button><button class="delete-category-btn p-2 text-gray-400 hover:text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg></button></div></div><ul class="space-y-3"></ul><div class="mt-4 pt-3 border-t border-gray-700 grid grid-cols-3 gap-2 text-center"><div><span class="text-sm font-medium text-gray-400">Total</span><p class="font-semibold text-white">${formatCurrency(categoryTotal)}</p></div><div><span class="text-sm font-medium text-green-400">Pago</span><p class="font-semibold text-green-400">${formatCurrency(categoryPaid)}</p></div><div><span class="text-sm font-medium text-yellow-400">Pendente</span><p class="font-semibold text-yellow-400">${formatCurrency(categoryTotal - categoryPaid)}</p></div></div></div>`);
+            const ul = categorySection.find('ul');
+            categoryBills.forEach(bill => {
+                const li = $(`<li data-id="${bill.id}" class="flex items-center p-2 rounded-md ${bill.isPaid ? 'paid-item bg-gray-700/50' : ''}"><input type="checkbox" class="bill-checkbox h-5 w-5 rounded-full bg-gray-600 border-gray-500 text-blue-500 focus:ring-blue-600 cursor-pointer" ${bill.isPaid ? 'checked' : ''}><div class="flex-grow ml-4"><p class="font-medium text-white description">${bill.description}</p><span class="text-sm text-gray-400 due-date">${bill.dueDate}</span></div><p class="font-semibold text-lg amount">${formatCurrency(parseFloat(bill.amount))}</p><div class="ml-4 flex items-center space-x-2"><button class="edit-btn p-2 text-gray-400 hover:text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg></button><button class="delete-btn p-2 text-gray-400 hover:text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg></button></div></li>`);
+                ul.append(li);
+            });
+            container.append(categorySection);
+        });
+        
+        const suggestions = $('#category-suggestions');
+        if (suggestions.length) {
+            suggestions.empty();
+            categories.forEach(cat => suggestions.append(`<option value="${cat}">`));
+        }
+    }
+    // #endregion
+
+    // #region ############# HANDLERS DE EVENTOS (ATUALIZADOS PARA OFFLINE) #############
+    
+    // ----- Navegação e Modais -----
+    $('nav').on('click', '.nav-link', function() { navigateTo($(this).data('view')); });
+    $(document).on('click', '.cancel-btn', (e) => $(e.target).closest('.modal').addClass('opacity-0 pointer-events-none'));
+    $(document).on('keydown', (e) => { if (e.key === "Escape") $('.modal').addClass('opacity-0 pointer-events-none'); });
+    $(document).on('click', '.confirm-ok-btn', function() {
+        if (typeof confirmCallback === 'function') confirmCallback();
+        closeModal('confirm-modal');
+        confirmCallback = null;
+    });
+    $(document).on('input', '.currency-input', function(e) {
+        let value = $(this).val().replace(/\D/g, '');
+        value = (value / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+        if (value === '0,00') $(this).val(''); else $(this).val(value);
+    });
+
+    // ----- Ganhos (Earnings) -----
+    $(document).on('click', '#add-earning-btn', function() {
+        const modalHtml = `<div class="modal-content bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6 transform scale-95 transition-transform"><h2 class="modal-title text-2xl font-bold mb-4">Adicionar Renda</h2><form id="earning-form"><input type="hidden" id="earning-id"><div class="mb-4"><label for="earning-description" class="block text-sm font-medium text-gray-300 mb-1">Descrição</label><input type="text" id="earning-description" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" required></div><div class="mb-6"><label for="earning-amount" class="block text-sm font-medium text-gray-300 mb-1">Valor</label><div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">R$</span><input type="text" id="earning-amount" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 pr-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 currency-input" required></div></div><div class="flex justify-end space-x-3"><button type="button" class="cancel-btn px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md font-medium">Cancelar</button><button type="submit" class="save-btn px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md font-medium">Salvar</button></div></form></div>`;
+        openModal('earning-modal', modalHtml);
+    });
+    $(document).on('click', '.edit-earning-btn', function() {
+        const id = $(this).closest('li').data('id');
+        const item = state.earnings.find(e => e.id === id);
+        $('#add-earning-btn').click();
+        $('#earning-modal .modal-title').text('Editar Renda');
+        $('#earning-id').val(item.id);
+        $('#earning-description').val(item.description);
+        $('#earning-amount').val(parseFloat(item.amount).toLocaleString('pt-BR', {minimumFractionDigits: 2}));
+    });
+    $(document).on('submit', '#earning-form', function(e) {
+        e.preventDefault();
+        const id = $('#earning-id').val();
+        const newItem = { 
+            id: id || `earning-${Date.now()}`,
+            description: $('#earning-description').val(), 
+            amount: parseCurrency($('#earning-amount').val())
+        };
+        // UI Otimista
+        if (id) {
+            const index = state.earnings.findIndex(e => e.id === id);
+            state.earnings[index] = { ...state.earnings[index], ...newItem };
+        } else {
+            state.earnings.push(newItem);
+        }
+        renderEarnings();
+        closeModal('earning-modal');
+        dataService.syncItem({ type: id ? 'UPDATE_EARNING' : 'ADD_EARNING', payload: newItem });
+    });
+    $(document).on('click', '.delete-earning-btn', function() {
+        const id = $(this).closest('li').data('id');
+        showConfirmModal("Tem certeza que deseja excluir esta fonte de renda?", () => {
+            state.earnings = state.earnings.filter(e => e.id !== id);
+            renderEarnings();
+            dataService.syncItem({ type: 'DELETE_EARNING', payload: { id: id } });
+        });
+    });
+
+    // ----- Propósitos (Purposes) -----
+    $(document).on('click', '#add-purpose-btn', function() {
+        const modalHtml = `<div class="modal-content bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6 transform scale-95 transition-transform"><h2 class="modal-title text-2xl font-bold mb-4">Adicionar Propósito</h2><form id="purpose-form"><input type="hidden" id="purpose-id"><div class="mb-4"><label for="purpose-description" class="block text-sm font-medium text-gray-300 mb-1">Descrição</label><input type="text" id="purpose-description" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" required></div><div class="mb-6"><label for="purpose-percentage" class="block text-sm font-medium text-gray-300 mb-1">Percentual</label><div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">%</span><input type="number" step="0.1" id="purpose-percentage" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 pr-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 percent-input" required></div></div><div class="flex justify-end space-x-3"><button type="button" class="cancel-btn px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md font-medium">Cancelar</button><button type="submit" class="save-btn px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md font-medium">Salvar</button></div></form></div>`;
+        openModal('purpose-modal', modalHtml);
+    });
+    $(document).on('click', '.edit-purpose-btn', function() {
+        const id = $(this).closest('div[data-id]').data('id');
+        const item = state.purposes.find(p => p.id === id);
+        $('#add-purpose-btn').click();
+        $('#purpose-modal .modal-title').text('Editar Propósito');
+        $('#purpose-id').val(item.id);
+        $('#purpose-description').val(item.description);
+        $('#purpose-percentage').val(item.percentage);
+    });
+    $(document).on('submit', '#purpose-form', function(e) {
+        e.preventDefault();
+        const id = $('#purpose-id').val();
+        const newItem = { 
+            id: id || `purpose-${Date.now()}`,
+            description: $('#purpose-description').val(),
+            percentage: parseFloat($('#purpose-percentage').val()) 
+        };
+        // UI Otimista
+        if (id) {
+            const index = state.purposes.findIndex(p => p.id === id);
+            state.purposes[index] = { ...state.purposes[index], ...newItem };
+        } else {
+            state.purposes.push(newItem);
+        }
+        renderEarnings();
+        closeModal('purpose-modal');
+        dataService.syncItem({ type: id ? 'UPDATE_PURPOSE' : 'ADD_PURPOSE', payload: newItem });
+    });
+    $(document).on('click', '.delete-purpose-btn', function() {
+        const id = $(this).closest('div[data-id]').data('id');
+         showConfirmModal("Tem certeza que deseja excluir este propósito?", () => {
+            state.purposes = state.purposes.filter(p => p.id !== id);
+            renderEarnings();
+            dataService.syncItem({ type: 'DELETE_PURPOSE', payload: { id: id } });
+        });
+    });
+
+    // ----- Contas (Bills) -----
+    $(document).on('click', '#add-bill-btn', function() {
+        const modalHtml = `<div class="modal-content bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6 transform scale-95 transition-transform"><h2 id="modal-title" class="text-2xl font-bold mb-4">Adicionar Nova Conta</h2><form id="bill-form"><input type="hidden" id="bill-id"><div class="mb-4"><label for="bill-description" class="block text-sm font-medium text-gray-300 mb-1">Descrição</label><input type="text" id="bill-description" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: Cartão Nubank" required></div><div class="grid grid-cols-2 gap-4 mb-4"><div><label for="bill-amount" class="block text-sm font-medium text-gray-300 mb-1">Valor</label><div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">R$</span><input type="text" id="bill-amount" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 pr-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 currency-input" placeholder="1.205,67" required></div></div><div><label for="bill-due-date" class="block text-sm font-medium text-gray-300 mb-1">Vencimento</label><input type="text" id="bill-due-date" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: 11/MM"></div></div><div class="mb-6"><label for="bill-category" class="block text-sm font-medium text-gray-300 mb-1">Categoria</label><input type="text" id="bill-category" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: Despesas Geral" required list="category-suggestions"><datalist id="category-suggestions"></datalist></div><div class="flex justify-end space-x-3"><button type="button" class="cancel-btn px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md font-medium">Cancelar</button><button type="submit" class="save-btn px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md font-medium">Salvar</button></div></form></div>`;
+        openModal('bill-modal', modalHtml);
+        const suggestions = $('#category-suggestions').empty();
+        [...new Set(state.bills.map(bill => bill.category))].forEach(cat => suggestions.append(`<option value="${cat}">`));
+    });
+    $(document).on('click', '.edit-btn', function() {
+        const id = $(this).closest('li').data('id');
+        const bill = state.bills.find(b => b.id === id);
+        if(bill) {
+            $('#add-bill-btn').click();
+            $('#bill-modal #modal-title').text('Editar Conta');
+            $('#bill-id').val(bill.id);
+            $('#bill-description').val(bill.description);
+            $('#bill-amount').val(parseFloat(bill.amount).toLocaleString('pt-BR', {minimumFractionDigits: 2}));
+            $('#bill-due-date').val(bill.dueDate);
+            $('#bill-category').val(bill.category);
+        }
+    });
+    $(document).on('submit', '#bill-form', function(e) {
+        e.preventDefault();
+        const id = $('#bill-id').val();
+        const newBill = { 
+            id: id || `bill-${Date.now()}`,
+            description: $('#bill-description').val(), 
+            amount: parseCurrency($('#bill-amount').val()), 
+            dueDate: $('#bill-due-date').val(), 
+            category: $('#bill-category').val().trim(),
+            isPaid: id ? state.bills.find(b => b.id === id).isPaid : false
+        };
+        
+        if (id) {
+            const index = state.bills.findIndex(b => b.id === id);
+            state.bills[index] = { ...state.bills[index], ...newBill };
+        } else {
+            state.bills.push(newBill);
+        }
+        renderBills();
+        closeModal('bill-modal');
+        dataService.syncItem({ type: id ? 'UPDATE_BILL' : 'ADD_BILL', payload: newBill });
+    });
+    $(document).on('click', '.delete-btn', function() {
+        const li = $(this).closest('li');
+        const id = li.data('id');
+        showConfirmModal('Tem certeza que deseja excluir esta conta?', () => {
+             state.bills = state.bills.filter(b => b.id !== id);
+             renderBills();
+             dataService.syncItem({ type: 'DELETE_BILL', payload: { id: id } });
+        });
+    });
+    $(document).on('click', '.bill-checkbox', function() {
+        const id = $(this).closest('li').data('id');
+        const bill = state.bills.find(b => b.id === id);
+        if (bill) {
+            bill.isPaid = $(this).is(':checked');
+            renderBills();
+            dataService.syncItem({ type: 'UPDATE_BILL_STATUS', payload: { id: id, isPaid: bill.isPaid } });
+        }
+    });
+    $(document).on('click', '.edit-category-btn', function() {
+        const wrapper = $(this).closest('.flex').siblings('.category-title-wrapper');
+        const h3 = wrapper.find('h3');
+        const oldCategory = h3.data('category');
+        const input = $(`<input type="text" class="category-edit-input" value="${oldCategory}" data-old-category="${oldCategory}">`);
+        wrapper.html(input);
+        input.focus().select();
+    });
+    $(document).on('blur keypress', '.category-edit-input', function(e) {
+         if (e.type === 'keypress' && e.which !== 13) return;
+         const input = $(this);
+         const oldCategory = input.data('old-category'), newCategory = input.val().trim();
+         if (newCategory && newCategory !== oldCategory) {
+            const affectedBillIds = [];
+            state.bills.forEach(bill => { 
+                if (bill.category === oldCategory) {
+                    bill.category = newCategory;
+                    affectedBillIds.push(bill.id);
+                }
+            });
+            renderBills();
+            dataService.syncItem({ type: 'UPDATE_CATEGORY', payload: { oldCategory, newCategory, billIds: affectedBillIds } });
+         } else {
+            renderBills();
+         }
+    });
+    $(document).on('click', '.delete-category-btn', function() {
+        const category = $(this).closest('.bg-gray-800').find('.category-title').data('category');
+        showConfirmModal(`Tem certeza que deseja excluir a categoria "${category}" e todas as suas contas?`, () => {
+            state.bills = state.bills.filter(b => b.category !== category);
+            renderBills();
+            dataService.syncItem({ type: 'DELETE_CATEGORY', payload: { category: category } });
+        });
+    });
+
+    // ----- Dashboard Actions -----
+    $(document).on('click', '#start-new-month-btn', function() {
+        showConfirmModal("Isso irá substituir seus ganhos e contas atuais pelos seus modelos salvos. Deseja continuar?", () => {
+            state.bills = state.billTemplates.map(template => ({ ...template, id: `bill-${Date.now()}-${Math.random()}`, isPaid: false }));
+            state.earnings = state.earningTemplates.map(template => ({ ...template, id: `earning-${Date.now()}-${Math.random()}`}));
+            navigateTo('bills');
+            dataService.syncItem({ type: 'START_NEW_MONTH' });
+        });
+    });
+
+    $(document).on('click', '#close-month-btn', function() {
+        showConfirmModal('Isso irá arquivar os dados atuais, salvar os itens como modelos para o próximo mês e limpar os registros. Deseja continuar?', () => {
+            if (state.bills.length === 0 && state.earnings.length === 0) { alert("Não há dados para fechar o mês."); return; }
+            
+            const now = new Date();
+            const totalEarnings = state.earnings.reduce((s,i)=>s+parseFloat(i.amount),0);
+            const totalExpenses = state.bills.reduce((s,i)=>s+parseFloat(i.amount),0);
+            const historyItem = { 
+                closedAt: now.toISOString().slice(0, 19).replace('T', ' '), 
+                monthYear: `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`, 
+                summary: { totalEarnings, totalExpenses, finalBalance: totalEarnings - totalExpenses }, 
+                earnings: state.earnings, 
+                bills: state.bills 
+            };
+            
+            state.history.push(historyItem);
+            state.billTemplates = state.bills.map(({id, isPaid, client_id, ...rest}) => rest);
+            state.earningTemplates = state.earnings.map(({id, client_id, ...rest}) => rest);
+            state.bills = []; state.earnings = [];
+            
+            navigateTo('dashboard');
+            dataService.syncItem({ type: 'CLOSE_MONTH', payload: { historyItem, billTemplates: state.billTemplates, earningTemplates: state.earningTemplates } });
+        });
+    });
+
+    $(document).on('click', '#clear-all-data-btn', function() {
+        showConfirmModal('Você está prestes a apagar TUDO do servidor: histórico, transações E SEUS MODELOS. Ação permanente. Deseja continuar?', () => {
+            state = { bills: [], earnings: [], purposes: [], history: [], billTemplates: [], earningTemplates: [], currentView: 'dashboard' };
+            navigateTo('dashboard');
+            dataService.syncItem({ type: 'CLEAR_ALL_DATA' });
+        });
+    });
+
+    // ----- Eventos de Status Online/Offline -----
+    window.addEventListener('online', () => {
+        state.isOnline = true;
+        console.log("Conexão reestabelecida. Tentando processar a fila...");
+        dataService.processSyncQueue(); 
+    });
+    window.addEventListener('offline', () => {
+        state.isOnline = false;
+        console.log("Conexão perdida. As alterações serão salvas localmente.");
+    });
+    // #endregion
+
+    // #region ############# INICIALIZAÇÃO DA APLICAÇÃO #############
+    
+    window.startApp = async () => {
+        await initDB();
+        $('#auth-section').hide();
+        $('#app-section').show();
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('Service Worker registrado.', reg))
+                .catch(err => console.error('Falha ao registrar Service Worker:', err));
+        }
+        dataService.loadAllData();
+    };
+
+    checkLoginStatus();
+
+    // #endregion
+});
+</script>
+</body>
+</html>
