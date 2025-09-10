@@ -1,15 +1,25 @@
 <?php
 
-// --- PRÉ-REQUISITOS E INICIALIZAÇÃO ---
+// api.php - Versão Limpa e Final
 
+// --- PRÉ-REQUISITOS E INICIALIZAÇÃO ---
+// Habilita a exibição de todos os erros para depuração.
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Inclui o autoloader do Composer.
 require __DIR__ . '/vendor/autoload.php';
+
+// Inicia a sessão. Deve ser chamado antes de qualquer output.
 session_start();
+
+// Define o cabeçalho da resposta como JSON.
+header("Content-Type: application/json");
 
 // Importa as classes necessárias da biblioteca WebAuthn
 use Webauthn\PublicKeyCredentialCreationOptions;
 use Webauthn\PublicKeyCredentialRequestOptions;
 use Webauthn\PublicKeyCredentialSource;
-use Webauthn\PublicKeyCredentialSourceRepository;
 use Webauthn\PublicKeyCredentialUserEntity;
 use Webauthn\PublicKeyCredentialRpEntity;
 use Webauthn\Server;
@@ -23,10 +33,6 @@ use Cose\Algorithm\Manager;
 use Cose\Algorithm\Signature\ECDSA\ES256;
 use Cose\Algorithm\Signature\RSA\RS256;
 
-header("Content-Type: application/json");
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
 // --- CONFIGURAÇÃO DO BANCO DE DADOS (PDO) ---
 $host = 'localhost';
 $db = 'financas_pessoais';
@@ -34,7 +40,7 @@ $user = 'root';
 $pass = '';
 $charset = 'utf8mb4';
 
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+$dsn = "mysql:host={$host};dbname={$db};charset={$charset}";
 $options = [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -51,7 +57,6 @@ try {
 
 // --- CONFIGURAÇÃO DO SERVIDOR WEBAUTHN ---
 
-// AQUI ESTÁ A CORREÇÃO PRINCIPAL -> Usando o caminho absoluto com \
 class PDOCredentialSourceRepository implements \Webauthn\PublicKeyCredentialSourceRepository {
     private $pdo;
     public function __construct(PDO $pdo) { $this->pdo = $pdo; }
@@ -94,14 +99,13 @@ $server = new Server($rpEntity, $credentialSourceRepository, new StandardAuthent
 $server->setAlgorithmManager($algorithmManager);
 $server->setAttestationStatementSupportManager($attestationStatementSupportManager);
 
-// --- LÓGICA DA API (O restante do arquivo permanece igual) ---
+// --- LÓGICA DA API ---
 $action = $_REQUEST['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
 
 function isLoggedIn() { return isset($_SESSION['user_id']); }
 function requireLogin() { if (!isLoggedIn()) { http_response_code(401); echo json_encode(['error' => 'Autenticação necessária.']); exit; } }
 
-// ... O switch case e todo o resto do código continua aqui ...
 switch ($action) {
     case 'getRegisterChallenge':
         $username = $_GET['username'] ?? '';
@@ -195,22 +199,16 @@ switch ($action) {
         
         $stmt_bills = $pdo->prepare("SELECT * FROM bills WHERE user_id = ?");
         $stmt_bills->execute([$userId]);
-        
         $stmt_earnings = $pdo->prepare("SELECT * FROM earnings WHERE user_id = ?");
         $stmt_earnings->execute([$userId]);
-
         $stmt_purposes = $pdo->prepare("SELECT * FROM purposes WHERE user_id = ?");
         $stmt_purposes->execute([$userId]);
-        
         $stmt_history = $pdo->prepare("SELECT * FROM financial_history WHERE user_id = ? ORDER BY closedAt ASC");
         $stmt_history->execute([$userId]);
-
         $stmt_bill_templates = $pdo->prepare("SELECT * FROM bill_templates WHERE user_id = ?");
         $stmt_bill_templates->execute([$userId]);
-
         $stmt_earning_templates = $pdo->prepare("SELECT * FROM earning_templates WHERE user_id = ?");
         $stmt_earning_templates->execute([$userId]);
-
         $history = $stmt_history->fetchAll();
         foreach ($history as $key => $item) {
             $history[$key]['data'] = json_decode($item['data']);
