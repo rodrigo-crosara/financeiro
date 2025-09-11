@@ -1,12 +1,7 @@
--- Remove o banco de dados antigo se ele existir, para começar do zero.
-DROP DATABASE IF EXISTS financas_pessoais;
+-- Garante que o banco de dados seja limpo antes de criar as novas tabelas.
+DROP TABLE IF EXISTS `bills`, `earnings`, `purposes`, `bill_templates`, `earning_templates`, `financial_history`, `user_authenticators`, `users`;
 
--- Cria o novo banco de dados.
-CREATE DATABASE IF NOT EXISTS financas_pessoais CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE financas_pessoais;
-
--- Tabela de Usuários atualizada (sem senha)
--- O `user_handle` é um ID único e estável para o usuário no sistema WebAuthn.
+-- Tabela de Usuários atualizada para WebAuthn (sem senha)
 CREATE TABLE `users` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_handle` varchar(255) NOT NULL,
@@ -18,23 +13,21 @@ CREATE TABLE `users` (
   UNIQUE KEY `user_handle` (`user_handle`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- NOVA Tabela para Armazenar as Credenciais WebAuthn (Passkeys)
--- Cada linha representa um dispositivo que o usuário registrou.
+-- Tabela para Armazenar as Credenciais WebAuthn (Passkeys)
 CREATE TABLE `user_authenticators` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
   `credential_id_base64url` TEXT NOT NULL,
   `public_key_pem` TEXT NOT NULL,
   `sign_count` int(11) UNSIGNED NOT NULL,
+  `transports` JSON DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `user_id` (`user_id`),
   CONSTRAINT `user_authenticators_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-
--- As tabelas a seguir permanecem, mas suas chaves estrangeiras apontam para a tabela `users` atualizada.
-
+-- Tabelas para os dados do mês corrente
 CREATE TABLE `bills` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
@@ -60,6 +53,7 @@ CREATE TABLE `earnings` (
   CONSTRAINT `earnings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Tabela para propósitos (distribuição de ganhos)
 CREATE TABLE `purposes` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
@@ -71,6 +65,7 @@ CREATE TABLE `purposes` (
   CONSTRAINT `purposes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Tabelas para os modelos de contas e ganhos
 CREATE TABLE `bill_templates` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
@@ -93,6 +88,7 @@ CREATE TABLE `earning_templates` (
   CONSTRAINT `earning_templates_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Tabela para o histórico de meses fechados
 CREATE TABLE `financial_history` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
