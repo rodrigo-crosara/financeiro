@@ -1,34 +1,31 @@
 <?php
-
-// api.php - Versão Limpa e Final
+// api.php - Versão Final e Completa
 
 // --- PRÉ-REQUISITOS E INICIALIZAÇÃO ---
-// Habilita a exibição de todos os erros para depuração.
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-// Inclui o autoloader do Composer.
 require __DIR__ . '/vendor/autoload.php';
 
-// Inicia a sessão. Deve ser chamado antes de qualquer output.
 session_start();
-
-// Define o cabeçalho da resposta como JSON.
 header("Content-Type: application/json");
 
-// Importa as classes necessárias da biblioteca WebAuthn
+// Importa as classes necessárias da biblioteca WebAuthn (LISTA ATUALIZADA)
 use Webauthn\PublicKeyCredentialCreationOptions;
 use Webauthn\PublicKeyCredentialRequestOptions;
 use Webauthn\PublicKeyCredentialSource;
 use Webauthn\PublicKeyCredentialUserEntity;
 use Webauthn\PublicKeyCredentialRpEntity;
-use Webauthn\Server;
-use Webauthn\AuthenticationConverter\StandardAuthenticationConverter;
 use Webauthn\AuthenticatorAssertionResponse;
 use Webauthn\AuthenticatorAttestationResponse;
 use Webauthn\AuthenticatorSelectionCriteria;
+use Webauthn\AuthenticationConverter\StandardAuthenticationConverter;
 use Webauthn\AttestationStatement\AttestationStatementSupportManager;
 use Webauthn\AttestationStatement\NoneAttestationStatementSupport;
+use Webauthn\AuthenticatorAssertionResponseValidator;
+use Webauthn\AuthenticatorAttestationResponseValidator;
+use Webauthn\PublicKeyCredentialLoader;
+use Webauthn\CredentialSourceRepository;
 use Cose\Algorithm\Manager;
 use Cose\Algorithm\Signature\ECDSA\ES256;
 use Cose\Algorithm\Signature\RSA\RS256;
@@ -36,8 +33,8 @@ use Cose\Algorithm\Signature\RSA\RS256;
 // --- CONFIGURAÇÃO DO BANCO DE DADOS (PDO) ---
 $host = 'localhost';
 $db = 'financas_pessoais';
-$user = 'root';
-$pass = '';
+$user = 'seust8890'; // Seu usuário do banco de dados
+$pass = 'SENHA_DO_BANCO'; // <<< MUDE AQUI PARA SUA SENHA REAL
 $charset = 'utf8mb4';
 
 $dsn = "mysql:host={$host};dbname={$db};charset={$charset}";
@@ -57,47 +54,56 @@ try {
 
 // --- CONFIGURAÇÃO DO SERVIDOR WEBAUTHN ---
 
-class PDOCredentialSourceRepository implements \Webauthn\PublicKeyCredentialSourceRepository {
+// Classe atualizada para implementar as duas novas interfaces da v5+
+class PDORepository implements PublicKeyCredentialLoader, CredentialSourceRepository {
     private $pdo;
     public function __construct(PDO $pdo) { $this->pdo = $pdo; }
 
-    public function findOneByCredentialId(string $publicKeyCredentialId): ?\Webauthn\PublicKeyCredentialSource {
-        $stmt = $this->pdo->prepare('SELECT user_handle, public_key_pem as credentialPublicKey, credential_id_base64url as publicKeyCredentialId, sign_count as counter, "public-key" as type FROM user_authenticators WHERE credential_id_base64url = ?');
+    public function findOneByCredentialId(string $publicKeyCredentialId): ?PublicKeyCredentialSource {
+        $stmt = $this->pdo->prepare('SELECT * FROM user_authenticators WHERE credential_id_base64url = ?');
         $stmt->execute([base64_encode($publicKeyCredentialId)]);
         $data = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$data) return null;
-        $data['aaguid'] = '00000000-0000-0000-0000-000000000000';
-        $data['transports'] = [];
-        return \Webauthn\PublicKeyCredentialSource::createFromArray($data);
+
+        return $data ? PublicKeyCredentialSource::createFromArray($data) : null;
     }
 
-    public function findAllForUserEntity(\Webauthn\PublicKeyCredentialUserEntity $publicKeyCredentialUserEntity): array {
-        $stmt = $this->pdo->prepare('SELECT credential_id_base64url FROM user_authenticators a JOIN users u ON a.user_id = u.id WHERE u.user_handle = ?');
+    public function findAllForUserEntity(PublicKeyCredentialUserEntity $publicKeyCredentialUserEntity): array {
+        $stmt = $this->pdo->prepare('SELECT * FROM user_authenticators a JOIN users u ON a.user_id = u.id WHERE u.user_handle = ?');
         $stmt->execute([$publicKeyCredentialUserEntity->getId()]);
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        return array_filter(array_map(function($row) {
-            $decodedId = base64_decode($row['credential_id_base64url']);
-            if ($decodedId === false) { return null; }
-            return ['id' => $decodedId, 'type' => 'public-key'];
-        }, $results));
+        
+        return array_map(fn($data) => PublicKeyCredentialSource::createFromArray($data), $results);
     }
 
-    public function saveCredentialSource(\Webauthn\PublicKeyCredentialSource $publicKeyCredentialSource): void {
+    public function saveCredentialSource(PublicKeyCredentialSource $publicKeyCredentialSource): void {
         $data = $publicKeyCredentialSource->jsonSerialize();
-        $stmt = $this->pdo->prepare('UPDATE user_authenticators SET sign_count = ? WHERE credential_id_base64url = ?');
-        $stmt->execute([$data['counter'], base64_encode($data['publicKeyCredentialId'])]);
+        
+        $stmt = $this->pdo->prepare('SELECT id FROM users WHERE user_handle = ?');
+        $stmt->execute([$data['userHandle']]);
+        $userId = $stmt->fetchColumn();
+
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM user_authenticators WHERE credential_id_base64url = ?");
+        $stmt->execute([base64_encode($data['publicKeyCredentialId'])]);
+        $exists = $stmt->fetchColumn() > 0;
+
+        if ($exists) {
+            $stmt = $this->pdo->prepare('UPDATE user_authenticators SET sign_count = ? WHERE credential_id_base64url = ?');
+            $stmt->execute([$data['counter'], base64_encode($data['publicKeyCredentialId'])]);
+        } else {
+            $stmt = $this->pdo->prepare("INSERT INTO user_authenticators (user_id, credential_id_base64url, public_key_pem, sign_count) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$userId, base64_encode($data['publicKeyCredentialId']), $data['credentialPublicKey'], $data['counter']]);
+        }
     }
 }
 
-$rpEntity = new PublicKeyCredentialRpEntity('Meu Painel Financeiro', 'localhost');
-$credentialSourceRepository = new PDOCredentialSourceRepository($pdo);
+$rpEntity = new PublicKeyCredentialRpEntity('Painel Financeiro', 'seustyle.net');
+$repository = new PDORepository($pdo);
 $attestationStatementSupportManager = new AttestationStatementSupportManager([new NoneAttestationStatementSupport()]);
 $algorithmManager = new Manager([new ES256(), new RS256()]);
 
-$server = new Server($rpEntity, $credentialSourceRepository, new StandardAuthenticationConverter());
-$server->setAlgorithmManager($algorithmManager);
-$server->setAttestationStatementSupportManager($attestationStatementSupportManager);
+// Validadores
+$authenticatorAttestationResponseValidator = new AuthenticatorAttestationResponseValidator($attestationStatementSupportManager, $repository);
+$authenticatorAssertionResponseValidator = new AuthenticatorAssertionResponseValidator($repository);
 
 // --- LÓGICA DA API ---
 $action = $_REQUEST['action'] ?? '';
@@ -115,7 +121,8 @@ switch ($action) {
         
         $userHandle = bin2hex(random_bytes(32));
         $userEntity = new PublicKeyCredentialUserEntity($username, $userHandle, $username);
-        $options = $server->generatePublicKeyCredentialCreationOptions($userEntity, new AuthenticatorSelectionCriteria());
+        $options = PublicKeyCredentialCreationOptions::create($rpEntity, $userEntity, random_bytes(32));
+        $options->setAttestation(PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE);
         $_SESSION['challenge'] = $options->getChallenge();
         $_SESSION['userEntity'] = $userEntity;
         echo json_encode($options);
@@ -124,17 +131,14 @@ switch ($action) {
     case 'registerUser':
         try {
             $userEntity = $_SESSION['userEntity'];
-            $attestationResponse = new AuthenticatorAttestationResponse($input['credential']);
-            $credentialSource = $server->loadAndCheckAttestationResponse($attestationResponse, $_SESSION['challenge']);
-
+            $attestationResponse = AuthenticatorAttestationResponse::create($input['credential']);
+            $publicKeyCredentialSource = $authenticatorAttestationResponseValidator->check($attestationResponse, $_SESSION['challenge'], $rpEntity->getId());
+            
             $pdo->beginTransaction();
             $stmt = $pdo->prepare("INSERT INTO users (user_handle, username, display_name) VALUES (?, ?, ?)");
             $stmt->execute([$userEntity->getId(), $userEntity->getName(), $userEntity->getDisplayName()]);
-            $userId = $pdo->lastInsertId();
-
-            $data = $credentialSource->jsonSerialize();
-            $stmt = $pdo->prepare("INSERT INTO user_authenticators (user_id, credential_id_base64url, public_key_pem, sign_count) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$userId, base64_encode($data['publicKeyCredentialId']), $data['credentialPublicKey'], $data['counter']]);
+            
+            $repository->saveCredentialSource($publicKeyCredentialSource);
             $pdo->commit();
             
             unset($_SESSION['challenge'], $_SESSION['userEntity']);
@@ -151,10 +155,14 @@ switch ($action) {
         $stmt->execute([$username]);
         $userHandle = $stmt->fetchColumn();
         if (!$userHandle) { echo json_encode(['error' => 'Usuário não encontrado.']); exit; }
-
+        
         $userEntity = new PublicKeyCredentialUserEntity($username, $userHandle, $username);
-        $allowedCredentials = $credentialSourceRepository->findAllForUserEntity($userEntity);
-        $options = $server->generatePublicKeyCredentialRequestOptions('discouraged', $allowedCredentials);
+        $allowedCredentials = $repository->findAllForUserEntity($userEntity);
+        $descriptors = array_map(fn(PublicKeyCredentialSource $cred) => $cred->getPublicKeyCredentialDescriptor(), $allowedCredentials);
+
+        $options = PublicKeyCredentialRequestOptions::create(random_bytes(32));
+        $options->setRpId($rpEntity->getId());
+        $options->setAllowedCredentials($descriptors);
         $_SESSION['challenge'] = $options->getChallenge();
         $_SESSION['username_for_login'] = $username;
         echo json_encode($options);
@@ -163,13 +171,15 @@ switch ($action) {
     case 'loginUser':
         try {
             $username = $_SESSION['username_for_login'];
-            $assertionResponse = new AuthenticatorAssertionResponse($input['credential']);
-            $credentialSource = $server->loadAndCheckAssertionResponse($assertionResponse, $_SESSION['challenge']);
+            $assertionResponse = AuthenticatorAssertionResponse::create($input['credential']);
+            $publicKeyCredentialSource = $authenticatorAssertionResponseValidator->check($assertionResponse, $_SESSION['challenge'], $rpEntity->getId());
             
+            $repository->saveCredentialSource($publicKeyCredentialSource);
+
             $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
             $stmt->execute([$username]);
             $userId = $stmt->fetchColumn();
-
+            
             $_SESSION['user_id'] = $userId;
             $_SESSION['username'] = $username;
             unset($_SESSION['challenge'], $_SESSION['username_for_login']);

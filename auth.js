@@ -1,7 +1,8 @@
+// auth.js - Versão Final e Corrigida
+
 $(document).ready(function() {
 
     // --- Funções Auxiliares para WebAuthn (Base64URL <-> ArrayBuffer) ---
-    // O servidor envia dados em Base64URL, mas a API do navegador precisa de ArrayBuffers.
     function bufferDecode(value) {
         return Uint8Array.from(atob(value.replace(/_/g, '/').replace(/-/g, '+')), c => c.charCodeAt(0));
     }
@@ -43,23 +44,27 @@ $(document).ready(function() {
         try {
             // 1. Pedir o "desafio" de registro para o servidor
             const response = await fetch(`api.php?action=getRegisterChallenge&username=${username}`);
-            const challenge = await response.json();
+            let options = await response.json();
 
-            if (challenge.error) {
-                throw new Error(challenge.error);
+            if (options.error) {
+                throw new Error(options.error);
             }
 
             // Decodificar os dados do servidor para o formato que a API WebAuthn precisa
-            challenge.challenge = bufferDecode(challenge.challenge);
-            challenge.user.id = bufferDecode(challenge.user.id);
+            options.challenge = bufferDecode(options.challenge);
+            options.user.id = bufferDecode(options.user.id);
+            if (options.excludeCredentials) {
+                options.excludeCredentials.forEach(cred => {
+                    cred.id = bufferDecode(cred.id);
+                });
+            }
 
             // 2. Chamar a API do navegador para criar a credencial (Passkey)
-            // Isso irá abrir a janela de biometria/PIN do sistema operacional
             const credential = await navigator.credentials.create({
-                publicKey: challenge
+                publicKey: options
             });
 
-            // 3. Enviar a credencial criada de volta para o servidor para ser salva
+            // 3. Enviar a credencial criada de volta para o servidor para ser salva (FORMATO CORRIGIDO)
             const credentialForServer = {
                 id: credential.id,
                 rawId: bufferEncode(credential.rawId),
@@ -73,7 +78,6 @@ $(document).ready(function() {
             const registerResponse = await fetch('api.php?action=registerUser', {
                 method: 'POST',
                 body: JSON.stringify({
-                    username: username,
                     credential: credentialForServer
                 }),
                 headers: { 'Content-Type': 'application/json' }
@@ -83,7 +87,8 @@ $(document).ready(function() {
 
             if (registerResult.success) {
                 alert('Usuário registrado com sucesso! Agora você pode entrar.');
-                $('#show-login').click(); // Volta para a tela de login
+                $('#login-username').val(username);
+                $('#show-login').click();
             } else {
                 throw new Error(registerResult.error || 'Falha ao registrar.');
             }
@@ -109,25 +114,26 @@ $(document).ready(function() {
         try {
             // 1. Pedir o "desafio" de login para o servidor
             const response = await fetch(`api.php?action=getLoginChallenge&username=${username}`);
-            const challenge = await response.json();
+            let options = await response.json();
 
-            if (challenge.error) {
-                throw new Error(challenge.error);
+            if (options.error) {
+                throw new Error(options.error);
             }
             
             // Decodificar os dados
-            challenge.challenge = bufferDecode(challenge.challenge);
-            challenge.allowCredentials.forEach(function(cred) {
-                cred.id = bufferDecode(cred.id);
-            });
+            options.challenge = bufferDecode(options.challenge);
+            if (options.allowCredentials) {
+                options.allowCredentials.forEach(function(cred) {
+                    cred.id = bufferDecode(cred.id);
+                });
+            }
 
             // 2. Chamar a API do navegador para obter a "assinatura" do desafio
-            // Isso também abrirá a janela de biometria/PIN
             const credential = await navigator.credentials.get({
-                publicKey: challenge
+                publicKey: options
             });
 
-            // 3. Enviar a resposta para o servidor verificar
+            // 3. Enviar a resposta para o servidor verificar (FORMATO CORRIGIDO)
             const credentialForServer = {
                 id: credential.id,
                 rawId: bufferEncode(credential.rawId),
@@ -136,14 +142,13 @@ $(document).ready(function() {
                     authenticatorData: bufferEncode(credential.response.authenticatorData),
                     clientDataJSON: bufferEncode(credential.response.clientDataJSON),
                     signature: bufferEncode(credential.response.signature),
-                    userHandle: bufferEncode(credential.response.userHandle),
+                    userHandle: credential.response.userHandle ? bufferEncode(credential.response.userHandle) : null,
                 },
             };
 
             const loginResponse = await fetch('api.php?action=loginUser', {
                 method: 'POST',
                 body: JSON.stringify({
-                    username: username,
                     credential: credentialForServer
                 }),
                 headers: { 'Content-Type': 'application/json' }
@@ -152,7 +157,6 @@ $(document).ready(function() {
             const loginResult = await loginResponse.json();
 
             if (loginResult.success) {
-                // Se o login for bem-sucedido, inicia a aplicação principal
                 window.startApp();
             } else {
                 throw new Error(loginResult.error || 'Falha no login.');
@@ -170,11 +174,12 @@ $(document).ready(function() {
             const response = await fetch('api.php?action=checkLogin');
             const result = await response.json();
 
+            if (result.error) { throw new Error(result.error); }
+
             if (result.loggedIn) {
                 console.log(`Usuário "${result.username}" já está logado.`);
-                window.startApp(); // Inicia a aplicação principal
+                window.startApp();
             } else {
-                // Se não estiver logado, exibe a seção de autenticação
                 $('#auth-section').show();
             }
         } catch (err) {
